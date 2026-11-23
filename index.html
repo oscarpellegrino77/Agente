@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agente de IA</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#0b1a2b">
+<style>
+:root{--bg:#f3f1ec;--fg:#1c1c1a;--card:#fff;--bd:#c9c5bb;--ac:#1f5c4a;--er:#a3321f}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1a2b;--fg:#e6edf3;--card:#12263b;--bd:#264a6b;--ac:#5fd8e8;--er:#ff8f7a}}
+*{box-sizing:border-box}
+body{margin:0;padding:14px;padding-top:max(14px,env(safe-area-inset-top));padding-bottom:max(14px,env(safe-area-inset-bottom));background:var(--bg);color:var(--fg);font:16px/1.45 Georgia,serif;max-width:720px;margin-inline:auto}
+.portada{width:100%;height:auto;border-radius:8px;display:block}
+h1{font-size:1.6rem;margin:.5em 0 .3em}
+label{display:block;margin:.7em 0 .2em;font-size:.9rem}
+input,textarea,select{width:100%;padding:10px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--fg);font:inherit}
+textarea{min-height:110px}
+.dos{display:flex;gap:8px}.dos>div{flex:1}
+.chk{display:flex;align-items:center;gap:8px;margin:.5em 0}.chk input{width:auto}
+.fila{display:flex;gap:8px;margin-top:12px}
+button{flex:1;padding:12px;border:0;border-radius:6px;font:inherit;font-weight:bold;background:var(--ac);color:var(--bg);cursor:pointer}
+button.sec{background:transparent;color:var(--fg);border:1px solid var(--bd)}
+button:disabled{opacity:.5}
+#estado{margin-top:10px;font-size:.88rem;opacity:.85}
+#log{margin-top:14px;display:flex;flex-direction:column;gap:6px}
+.l{padding:8px 10px;border-left:3px solid var(--bd);background:var(--card);white-space:pre-wrap;word-break:break-word;font-size:.92rem}
+.l.ok{border-color:var(--ac)}.l.err{border-color:var(--er)}
+#arch a{display:block;margin-top:8px;color:var(--ac)}
+small{opacity:.75}
+#lock{position:fixed;inset:0;z-index:99;background:var(--bg);display:flex;flex-direction:column;justify-content:center;gap:10px;padding:24px;max-width:720px;margin:auto}
+#lock[hidden]{display:none}
+#vozest{margin-top:8px;font-size:.88rem;opacity:.85;min-height:1.2em}
+</style>
+</head>
+<body>
+<div id="lock">
+  <h1>Agente de IA</h1>
+  <label for="lnom">Tu nombre</label>
+  <input id="lnom" autocomplete="off">
+  <label for="lpass">Contraseña</label>
+  <input id="lpass" type="password" inputmode="numeric" autocomplete="off">
+  <button id="lgo">Entrar</button>
+  <div id="lmsg" role="alert"></div>
+</div>
+<img class="portada" src="portada.jpg" alt="Robot de IA frente a una pantalla con datos" width="1200" height="655">
+<h1>Agente de IA</h1>
+<button id="inst" hidden>Instalar en el teléfono</button>
+
+<label for="key">Clave de OpenRouter</label>
+<input id="key" type="password" autocomplete="off">
+<label for="model">Modelo</label>
+<input id="model">
+<div class="dos">
+  <div><label for="max">Pasos máximos</label><input id="max" type="number" value="15" min="1" max="200"></div>
+  <div><label for="modo">Tipo de tarea</label>
+    <select id="modo">
+      <option value="libre">Libre</option>
+      <option value="investigar">Investigar</option>
+      <option value="escribir">Escribir</option>
+      <option value="resumir">Resumir páginas</option>
+    </select></div>
+</div>
+<label for="tarea">Qué querés que haga</label>
+<textarea id="tarea" placeholder="Ej.: buscá las novedades de tal tema y guardame un resumen"></textarea>
+<div class="chk"><input id="wl" type="checkbox" checked><label for="wl" style="margin:0">Mantener la pantalla encendida mientras trabaja</label></div>
+<div class="chk"><input id="voz" type="checkbox" checked><label for="voz" style="margin:0">Permitir que hable en voz alta</label></div>
+<div class="chk"><input id="siem" type="checkbox"><label for="siem" style="margin:0">Escuchar siempre: decí “704, …” y la orden</label></div>
+<div class="fila">
+  <button id="go">Empezar</button>
+  <button id="mic" class="sec">🎤 Hablar</button>
+  <button id="stop" class="sec">Parar</button>
+</div>
+<div id="vozest"></div>
+<div id="estado"><span id="uso">0 tokens</span> · <span id="pant">pantalla: libre</span></div>
+<small>La clave se guarda solo en este dispositivo. Cada paso gasta crédito de tu cuenta.</small>
+<div class="fila">
+  <button id="copiar" class="sec">Copiar resultado</button>
+  <button id="guardar" class="sec">Guardar registro</button>
+</div>
+<div id="log"></div>
+<div id="arch"></div>
+<script>
+const $ = id => document.getElementById(id);
+const API = 'https://openrouter.ai/api/v1/chat/completions';
+const store = {
+  get(k){ try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } },
+  set(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
+};
+$('key').value = store.get('k');
+$('model').value = store.get('m') || 'anthropic/claude-sonnet-4.5';
+$('max').value = store.get('x') || 15;
+$('tarea').value = store.get('t');
+$('wl').checked = store.get('w') !== '0';
+$('voz').checked = store.get('v') !== '0';
+
+const PRE = {
+  libre: '',
+  investigar: 'Investigá a fondo con varias búsquedas, contrastá fuentes y guardá un resumen claro en un archivo. ',
+  escribir: 'Escribí el texto pedido con cuidado de autor y guardalo en un archivo. ',
+  resumir: 'Leé las páginas indicadas y guardá un resumen con los puntos clave. '
+};
+const SYS = `Sos un agente autónomo. Cumplís la tarea del usuario usando acciones.
+En cada turno respondé SOLO con un objeto JSON, sin texto extra. Acciones:
+{"accion":"buscar","consulta":"..."}   busca en internet y devuelve un resumen con fuentes
+{"accion":"leer","url":"https://..."}  trae el texto de una página
+{"accion":"archivo","nombre":"x.txt","contenido":"..."}  crea un archivo descargable
+{"accion":"hablar","texto":"..."}      lo dice en voz alta
+{"accion":"fin","resultado":"resumen de lo hecho"}
+Buscá y leé antes de escribir. No repitas una acción. Terminá con "fin" cuando esté hecho.`;
+
+let parar = false, corriendo = false, wl = null, tokens = 0, resultado = '', registro = '';
+const cache = new Map();
+const dormir = ms => new Promise(r => setTimeout(r, ms));
+
+function log(t, c){
+  const d = document.createElement('div');
+  d.className = 'l ' + (c || '');
+  d.textContent = t;
+  $('log').appendChild(d);
+  registro += t + '\n\n';
+  if (d.scrollIntoView) d.scrollIntoView({block:'end'});
+}
+
+async function pantalla(on){
+  try {
+    if (on && 'wakeLock' in navigator && !wl){
+      wl = await navigator.wakeLock.request('screen');
+      wl.addEventListener('release', () => { wl = null; });
+      $('pant').textContent = 'pantalla: siempre encendida';
+    } else if (!on && wl){
+      await wl.release(); wl = null;
+      $('pant').textContent = 'pantalla: libre';
+    } else if (on && !('wakeLock' in navigator)){
+      $('pant').textContent = 'pantalla: no se puede bloquear en este navegador';
+    }
+  } catch(e){ $('pant').textContent = 'pantalla: no se pudo bloquear'; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && corriendo && $('wl').checked) pantalla(true);
+});
+
+async function pedir(body){
+  for (let n = 0; n < 3; n++){
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 90000);
+    try {
+      const r = await fetch(API, {
+        method:'POST', signal:ac.signal,
+        headers:{'Authorization':'Bearer ' + $('key').value.trim(), 'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      });
+      clearTimeout(t);
+      if (r.status === 429 || r.status >= 500){ await dormir(1500 * (n + 1)); continue; }
+      const j = await r.json();
+      if (!r.ok) throw new Error((j.error && j.error.message) || r.status);
+      if (j.usage){ tokens += j.usage.total_tokens || 0; $('uso').textContent = tokens + ' tokens'; }
+      return j.choices[0].message.content;
+    } catch(e){
+      clearTimeout(t);
+      if (n === 2 || !/abort|fetch|network/i.test(e.message || '')) throw e;
+      await dormir(1500 * (n + 1));
+    }
+  }
+  throw new Error('Sin respuesta tras 3 intentos');
+}
+
+// Ahorra tokens: las observaciones viejas se acortan y solo las últimas 6 quedan completas.
+function contexto(msgs){
+  const cola = msgs.slice(2), k = cola.length - 6;
+  return msgs.slice(0, 2).concat(cola.map((m, i) => i < k ? {role:m.role, content:m.content.slice(0, 300)} : m));
+}
+
+async function accion(a){
+  const clave = JSON.stringify(a);
+  if ((a.accion === 'buscar' || a.accion === 'leer') && cache.has(clave)) return cache.get(clave);
+  let out;
+  if (a.accion === 'buscar'){
+    out = await pedir({model:$('model').value.trim(), messages:[{role:'user', content:a.consulta}], plugins:[{id:'web'}]});
+  } else if (a.accion === 'leer'){
+    const r = await fetch('https://r.jina.ai/' + a.url);
+    out = await r.text();
+  } else if (a.accion === 'archivo'){
+    const u = URL.createObjectURL(new Blob([a.contenido], {type:'text/plain'}));
+    const l = document.createElement('a');
+    l.href = u; l.download = a.nombre; l.textContent = 'Descargar ' + a.nombre;
+    $('arch').appendChild(l);
+    return 'Archivo listo: ' + a.nombre;
+  } else if (a.accion === 'hablar'){
+    if (!$('voz').checked) return 'La voz está desactivada';
+    speechSynthesis.speak(new SpeechSynthesisUtterance(a.texto));
+    return 'Dicho en voz alta';
+  } else return 'Acción desconocida';
+  out = String(out).slice(0, 4000);
+  cache.set(clave, out);
+  return out;
+}
+
+async function correr(){
+  if (corriendo || !abierto) return;
+  parar = false; corriendo = true; tokens = 0; resultado = ''; registro = '';
+  cache.clear();
+  $('log').innerHTML = ''; $('arch').innerHTML = ''; $('uso').textContent = '0 tokens';
+  store.set('k', $('key').value.trim()); store.set('m', $('model').value.trim());
+  store.set('x', $('max').value); store.set('t', $('tarea').value);
+  store.set('w', $('wl').checked ? '1' : '0'); store.set('v', $('voz').checked ? '1' : '0');
+  const max = Math.min(200, +$('max').value || 15);
+  const msgs = [{role:'system', content:SYS}, {role:'user', content:'Tarea: ' + PRE[$('modo').value] + $('tarea').value}];
+  $('go').disabled = true;
+  if ($('wl').checked) await pantalla(true);
+  let previa = '', repes = 0;
+  try {
+    for (let i = 1; i <= max && !parar; i++){
+      const resp = await pedir({model:$('model').value.trim(), messages:contexto(msgs)});
+      msgs.push({role:'assistant', content:resp});
+      let a;
+      try { a = JSON.parse(resp.slice(resp.indexOf('{'), resp.lastIndexOf('}') + 1)); }
+      catch(e){ msgs.push({role:'user', content:'Respondé solo JSON válido.'}); continue; }
+      const k = JSON.stringify(a);
+      repes = k === previa ? repes + 1 : 0; previa = k;
+      if (repes >= 2){ log('Se repitió la misma acción; se detiene para no gastar crédito.', 'err'); break; }
+      log('[' + i + '] ' + a.accion + (a.consulta ? ': ' + a.consulta : a.url ? ': ' + a.url : a.nombre ? ': ' + a.nombre : ''));
+      if (a.accion === 'fin'){ resultado = a.resultado || ''; log(resultado, 'ok'); if ($('voz').checked && typeof speechSynthesis !== 'undefined') speechSynthesis.speak(new SpeechSynthesisUtterance(resultado)); break; }
+      let obs;
+      try { obs = await accion(a); } catch(e){ obs = 'Error: ' + e.message; }
+      msgs.push({role:'user', content:'Resultado: ' + String(obs).slice(0, 4000)});
+    }
+    if (parar) log('Detenido.', 'err');
+  } catch(e){ log('Error: ' + e.message, 'err'); }
+  corriendo = false;
+  await pantalla(false);
+  $('go').disabled = false;
+}
+
+$('go').onclick = correr;
+$('stop').onclick = () => { parar = true; };
+$('copiar').onclick = async () => { try { await navigator.clipboard.writeText(resultado || registro); } catch(e){} };
+$('guardar').onclick = () => {
+  const l = document.createElement('a');
+  l.href = URL.createObjectURL(new Blob([registro], {type:'text/plain'}));
+  l.download = 'registro-agente.txt'; l.click();
+};
+
+// Candado: nombre y contraseña. Es un cerrojo para uso personal, no seguridad fuerte:
+// quien lea el código de la página podría probar claves.
+const CLAVE = 7043742296853627;
+const cyrb53 = (s, seed = 0) => { let a = 0xdeadbeef ^ seed, b = 0x41c6ce57 ^ seed;
+  for (let i = 0, c; i < s.length; i++){ c = s.charCodeAt(i); a = Math.imul(a ^ c, 2654435761); b = Math.imul(b ^ c, 1597334677); }
+  a = Math.imul(a ^ (a >>> 16), 2246822507) ^ Math.imul(b ^ (b >>> 13), 3266489909);
+  b = Math.imul(b ^ (b >>> 16), 2246822507) ^ Math.imul(a ^ (a >>> 13), 3266489909);
+  return 4294967296 * (2097151 & b) + (a >>> 0); };
+const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+let abierto = false, fallos = 0, bloqHasta = 0;
+async function entrar(){
+  if (Date.now() < bloqHasta){ $('lmsg').textContent = 'Esperá unos segundos.'; return; }
+  if (cyrb53(norm($('lnom').value) + '|' + $('lpass').value.trim() + '|agente') === CLAVE){
+    abierto = true; fallos = 0; $('lock').hidden = true; $('lpass').value = ''; $('lmsg').textContent = '';
+  } else {
+    fallos++; $('lmsg').textContent = 'Nombre o contraseña incorrectos.';
+    if (fallos >= 3){ bloqHasta = Date.now() + 30000; fallos = 0; $('lmsg').textContent = 'Demasiados intentos. Esperá 30 segundos.'; }
+  }
+}
+$('lgo').onclick = entrar;
+$('lpass').addEventListener('keydown', e => { if (e.key === 'Enter') entrar(); });
+
+// Voz: solo obedece órdenes que empiezan con 704.
+const SR = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
+let rec = null, escuchando = false;
+function vozEstado(t){ $('vozest').textContent = t; }
+function manejar(t){
+  const m = String(t).match(/^\s*(?:7\s*0\s*4|setecientos\s+cuatro|siete\s+cero\s+cuatro)(?!\d)[\s,:;.!¡¿-]*([\s\S]*)$/i);
+  if (!m){ vozEstado('Ignorado: la orden no empezó con 704.'); return; }
+  const o = m[1].trim();
+  if (/^(para|parar|detente|alto|stop)$/.test(norm(o))){ parar = true; vozEstado('Detenido por voz.'); return; }
+  if (!o){ vozEstado('Te escucho.'); return; }
+  if (!abierto){ vozEstado('Primero ingresá la contraseña.'); return; }
+  vozEstado('Orden: ' + o);
+  $('tarea').value = o; correr();
+}
+function escuchar(){
+  if (!SR){ vozEstado('Este navegador no tiene reconocimiento de voz. Probá con Chrome.'); return; }
+  if (!abierto || escuchando) return;
+  rec = new SR(); rec.lang = 'es-AR'; rec.interimResults = false; rec.continuous = false;
+  rec.onresult = e => manejar(e.results[0][0].transcript);
+  rec.onerror = e => vozEstado('Voz: ' + e.error);
+  rec.onend = () => { escuchando = false; $('mic').textContent = '🎤 Hablar'; if ($('siem').checked && abierto) setTimeout(escuchar, 400); };
+  try { rec.start(); escuchando = true; $('mic').textContent = '🎤 Escuchando…'; vozEstado('Escuchando…'); }
+  catch(e){ vozEstado('No se pudo iniciar el micrófono.'); }
+}
+$('mic').onclick = escuchar;
+$('siem').onchange = () => { if ($('siem').checked) escuchar(); else if (rec && escuchando) rec.stop(); };
+
+let inst = null;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); inst = e; $('inst').hidden = false; });
+$('inst').onclick = async () => { if (inst){ inst.prompt(); inst = null; $('inst').hidden = true; } };
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
